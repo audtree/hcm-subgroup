@@ -1,0 +1,94 @@
+# NOTE: This workflow is the base for the random / current / optimistic workflows.
+#   To convert to 'random', do nothing
+#   To convert to 'current', add a new variable `current_hcm_diagnosis` that is a property with the column `current_hcm_diagnosis`
+#   To convert to 'optimistic', set `n_patients_screened` to 1_000_000 (i.e. remove the capacity constraint)
+
+  metadata:
+    name: "HCM (Base for random / current / optimistic)"
+
+  variables:
+    # Patient properties
+    has_hcm:
+      type: property # Boolean property that is true if the patient has HCM
+      value: None # this will be overwritten
+    clinical_result:
+      type: property
+      distribution: uniform
+      start: 0
+      end: 1
+    # Fixed constants
+    clinical_sensitivity:
+      value: 0.95 # Sensitivity of clinical screening ('s' in the diagram)
+    clinical_specificity:
+      value: 0.95 # Specificity of clinical screening ('r' in the diagram)
+    # Resources
+    hcm_clinic_capacity:
+      type: resource
+      init_amount: 2
+      max_amount: 2 # HCM clinic can only see 2 patients per day ('C' in the diagram)
+      refill_amount: 2
+      refill_duration: 1 # Resets every day
+
+  states:
+    start:
+      type: start
+      label: "Start"
+      transitions:
+        - dest: prescreen_patients
+    prescreen_patients: # Clinical pre-screening
+      label: "Clinical screening"
+      transitions:
+        - dest: screen_patients
+          if: (has_hcm and (clinical_result <=  clinical_sensitivity)) or (not has_hcm and (clinical_result >= clinical_specificity))
+        - dest: undiagnosed
+    screen_patients:
+      label: "Screened patients"
+      transitions:
+        - dest: visit_hcm_clinic
+          if: hcm_clinic_capacity > 0
+          resource_deltas: # Decrement the capacity of the HCM clinic when a patient is seen
+            hcm_clinic_capacity: -1
+        - dest: undiagnosed
+    visit_hcm_clinic:
+      label: "Patients worked up at HCM clinic"
+      transitions:
+        - dest: diagnosed
+          if: has_hcm
+        - dest: undiagnosed
+    diagnosed:
+      label: "Diagnosed"
+      transitions:
+        - dest: true_positive
+          if: has_hcm
+        - dest: false_positive
+          if: not has_hcm
+    undiagnosed:
+      label: "Undiagnosed"
+      transitions:
+        - dest: true_negative
+          if: not has_hcm
+        - dest: false_negative
+    true_positive:
+      type: end
+      label: "True Positive"
+      utilities:
+        - value: 0.995**5 # 0.5% annual ortality for 5 years
+          unit: five_year_life_expectancy
+    false_positive:
+      type: end
+      label: "False Positive"
+      utilities:
+        - value: 1
+          unit: five_year_life_expectancy
+    true_negative:
+      type: end
+      label: "True Negative"
+      utilities:
+        - value: 1
+          unit: five_year_life_expectancy
+    false_negative:
+      type: end
+      label: "False Negative"
+      utilities:
+        - value: 0.95**5 # 5% annual mortality for 5 years
+          unit: five_year_life_expectancy
